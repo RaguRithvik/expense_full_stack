@@ -1,0 +1,2 @@
+MONGO_URI="mongodb+srv://ragurithvik_db_user:zWlcLV1r0cNEURgk@expense-manager.sch5emy.mongodb.net/?retryWrites=true&w=majority&appName=expense-manager"
+PORT="3000"

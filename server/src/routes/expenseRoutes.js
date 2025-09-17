@@ -6,22 +6,23 @@ import {
   updateExpense,
   deleteExpense
 } from "../controller/expenseController.js";
+import { auth } from "../middleware/auth.js";
 
 const router = express.Router();
 
 // Get all expenses
-router.get("/", getAllExpenses);
+router.get("/", auth, getAllExpenses);
 
 // Get expense by ID
-router.get("/:id", getExpenseById);
+router.get("/:id", auth, getExpenseById);
 
 // Create expense
-router.post("/", createExpense);
+router.post("/", auth, createExpense);
 
 // Update expense
-router.put("/:id", updateExpense);
+router.put("/:id", auth, updateExpense);
 
 // Delete expense
-router.delete("/:id", deleteExpense);
+router.delete("/:id", auth, deleteExpense);
 
 export default router;

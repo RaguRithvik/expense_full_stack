@@ -5,10 +5,11 @@ import categoryRoutes from "./categoryRoutes.js";
 import subcategoryRoutes from "./subcategoryRoutes.js";
 import expenseRoutes from "./expenseRoutes.js";
 import incomeRoutes from "./incomeRoutes.js";
-
+import authRoutes from "./authRoutes.js"; 
 // Create router
-const router = express.Router();
-
+const router = express.Router();// ...existing code...
+// ...existing code...
+router.use("/auth", authRoutes); // Add authentication routes
 // Mount routes on router
 router.use("/budgets", budgetRoutes);        // GET /api/budgets
 router.use("/categories", categoryRoutes);   // GET /api/categories

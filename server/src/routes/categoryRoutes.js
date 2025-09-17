@@ -6,22 +6,23 @@ import {
   updateCategory,
   deleteCategory
 } from "../controller/categoryController.js";
+import { auth } from "../middleware/auth.js";
 
 const router = express.Router();
 
 // Get all categories
-router.get("/", getAllCategories);
+router.get("/", auth, getAllCategories);
 
 // Get category by ID
-router.get("/:id", getCategoryById);
+router.get("/:id", auth, getCategoryById);
 
 // Create category
-router.post("/", createCategory);
+router.post("/", auth, createCategory);
 
 // Update category
-router.put("/:id", updateCategory);
+router.put("/:id", auth, updateCategory);
 
 // Delete category
-router.delete("/:id", deleteCategory);
+router.delete("/:id", auth, deleteCategory);
 
 export default router;

@@ -73,7 +73,7 @@ export const getAllIncomes = async (req, res) => {
         { $group: { _id: groupId, total: { $sum: "$amount" } } },
       ]);
 
-      if (reportType === "yearly") {
+      if (reportType === "year") {
         reportData = labels.map(label => {
           const found = agg.find(a => a._id === parseInt(label));
           return { name: label, total: found ? found.total : 0 };

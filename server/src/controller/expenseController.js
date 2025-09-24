@@ -92,7 +92,7 @@ export const getAllExpenses = async (req, res) => {
       if (reportType) {
         reportData = labels.map((label, i) => {
           let found;
-          if (reportType === "yearly") {
+          if (reportType === "year") {
             found = agg.find(a => a._id === parseInt(label));
           } else {
             found = agg.find(a => a._id === i + 1);

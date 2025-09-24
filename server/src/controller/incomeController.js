@@ -1,8 +1,5 @@
 import Income from "../models/Income.js";
 
-// Get all incomes with pagination, filtering, and reporting
-import Income from "../models/Income"; // adjust path
-
 export const getAllIncomes = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;

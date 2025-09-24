@@ -1,80 +1,137 @@
 import Income from "../models/Income.js";
 
-// Get all incomes with pagination and time-based filtering
+// Get all incomes with pagination, filtering, and reporting
+import Income from "../models/Income"; // adjust path
+
 export const getAllIncomes = async (req, res) => {
   try {
-    // Get pagination parameters from query with defaults
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 10;
-    const filter = req.query.filter; // Get time filter (day, week, month)
-    
-    // Calculate skip value for pagination
+    const { filter, reportType } = req.query;
+
     const skip = (page - 1) * pageSize;
-    
-    // Create query object for filtering
     let query = {};
-    
-    // Apply time-based filtering if specified
+    const now = new Date();
+
+    // --- Time-based filter ---
     if (filter) {
-      const now = new Date();
-      
-      if (filter === 'day') {
-        // Filter for today
-        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-        query.date = { $gte: startOfDay, $lt: endOfDay };
-      } else if (filter === 'week') {
-        // Filter for current week
-        const startOfWeek = new Date(now);
-        startOfWeek.setDate(now.getDate() - now.getDay()); // Start of week (Sunday)
-        startOfWeek.setHours(0, 0, 0, 0);
-        
-        const endOfWeek = new Date(startOfWeek);
-        endOfWeek.setDate(startOfWeek.getDate() + 7); // End of week (next Sunday)
-        
-        query.date = { $gte: startOfWeek, $lt: endOfWeek };
-      } else if (filter === 'month') {
-        // Filter for current month
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        endOfMonth.setHours(23, 59, 59, 999);
-        
-        query.date = { $gte: startOfMonth, $lte: endOfMonth };
+      if (filter === "day") {
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        query.date = { $gte: start, $lt: end };
+      } else if (filter === "week") {
+        const start = new Date(now);
+        start.setDate(now.getDate() - now.getDay());
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setDate(start.getDate() + 7);
+        query.date = { $gte: start, $lt: end };
+      } else if (filter === "month") {
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        end.setHours(23, 59, 59, 999);
+        query.date = { $gte: start, $lte: end };
+      } else if (filter === "year") {
+        const start = new Date(now.getFullYear(), 0, 1);
+        const end = new Date(now.getFullYear() + 1, 0, 1);
+        query.date = { $gte: start, $lt: end };
       }
     }
-    
-    // Get total count for pagination metadata based on filter
-    const total = await Income.countDocuments(query);
-    
-    // Find incomes with pagination and filter
-    const incomes = await Income.find(query)
-      .skip(skip)
-      .limit(pageSize);
-    
-    // Return paginated results with metadata
-    res.json({
+
+    // --- Unified Report Logic ---
+    if (reportType) {
+      let reportData = [];
+      let groupId = null;
+      let labels = [];
+
+      switch (reportType) {
+        case "daily":
+          groupId = { $dayOfWeek: "$date" };
+          labels = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+          break;
+        case "weekly":
+          const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+          const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+          query.date = { $gte: startOfMonth, $lte: endOfMonth };
+          groupId = { $week: "$date" };
+          labels = Array.from({ length: Math.ceil(endOfMonth.getDate() / 7) }, (_, i) => `Week ${i + 1}`);
+          break;
+        case "monthly":
+          groupId = { $month: "$date" };
+          labels = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+          ];
+          query.date = { $gte: new Date(now.getFullYear(), 0, 1), $lt: new Date(now.getFullYear() + 1, 0, 1) };
+          break;
+        case "yearly":
+          groupId = { $year: "$date" };
+          const currentYear = now.getFullYear();
+          labels = Array.from({ length: 4 }, (_, i) => (currentYear - (3 - i)).toString());
+          break;
+      }
+
+      const agg = await Income.aggregate([
+        { $match: query },
+        { $group: { _id: groupId, total: { $sum: "$amount" } } },
+      ]);
+
+      if (reportType === "yearly") {
+        reportData = labels.map(label => {
+          const found = agg.find(a => a._id === parseInt(label));
+          return { name: label, total: found ? found.total : 0 };
+        });
+      } else {
+        reportData = labels.map((label, i) => {
+          const found = agg.find(a => a._id === i + 1);
+          return { name: label, total: found ? found.total : 0 };
+        });
+      }
+
+      const topIncomes = await Income.find(query)
+        .sort({ amount: -1 })
+        .limit(5);
+
+      return res.json({ report: reportData, data: topIncomes });
+    }
+
+    // --- Paginated List ---
+    const [total, totalAmountResult, incomes] = await Promise.all([
+      Income.countDocuments(query),
+      Income.aggregate([
+        { $match: query },
+        { $group: { _id: null, totalAmount: { $sum: "$amount" } } },
+      ]),
+      Income.find(query).skip(skip).limit(pageSize),
+    ]);
+
+    const totalAmount = totalAmountResult.length > 0 ? totalAmountResult[0].totalAmount : 0;
+
+    return res.json({
       data: incomes,
+      totalAmount,
       pagination: {
         total,
         page,
         pageSize,
-        totalPages: Math.ceil(total / pageSize)
-      }
+        totalPages: Math.ceil(total / pageSize),
+      },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
+
 // Get income by ID
 export const getIncomeById = async (req, res) => {
   try {
     const income = await Income.findById(req.params.id);
-    
+
     if (!income) {
       return res.status(404).json({ message: "Income not found" });
     }
-    
+
     res.json(income);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -99,11 +156,11 @@ export const updateIncome = async (req, res) => {
       req.body,
       { new: true, runValidators: true }
     );
-    
+
     if (!income) {
       return res.status(404).json({ message: "Income not found" });
     }
-    
+
     res.json(income);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -114,11 +171,11 @@ export const updateIncome = async (req, res) => {
 export const deleteIncome = async (req, res) => {
   try {
     const income = await Income.findByIdAndDelete(req.params.id);
-    
+
     if (!income) {
       return res.status(404).json({ message: "Income not found" });
     }
-    
+
     res.json({ message: "Income deleted successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -12,7 +12,7 @@ export const getAllIncomes = async (req, res) => {
 
     // --- Time-based filter ---
     if (filter) {
-      if (filter === "day") {
+      if (filter === "daily") {
         const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
         query.date = { $gte: start, $lt: end };
@@ -46,14 +46,14 @@ export const getAllIncomes = async (req, res) => {
           groupId = { $dayOfWeek: "$date" };
           labels = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
           break;
-        case "weekly":
+        case "week":
           const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
           const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
           query.date = { $gte: startOfMonth, $lte: endOfMonth };
           groupId = { $week: "$date" };
           labels = Array.from({ length: Math.ceil(endOfMonth.getDate() / 7) }, (_, i) => `Week ${i + 1}`);
           break;
-        case "monthly":
+        case "month":
           groupId = { $month: "$date" };
           labels = [
             "January", "February", "March", "April", "May", "June",
@@ -61,7 +61,7 @@ export const getAllIncomes = async (req, res) => {
           ];
           query.date = { $gte: new Date(now.getFullYear(), 0, 1), $lt: new Date(now.getFullYear() + 1, 0, 1) };
           break;
-        case "yearly":
+        case "year":
           groupId = { $year: "$date" };
           const currentYear = now.getFullYear();
           labels = Array.from({ length: 4 }, (_, i) => (currentYear - (3 - i)).toString());

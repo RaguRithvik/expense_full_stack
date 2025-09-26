@@ -15,11 +15,12 @@ export const getAllExpenses = async (req, res) => {
     if (category) query.category_id = category;
     if (subcategory) query.subcat_id = subcategory;
 
+    // --- Time-based filter for pagination/listing ---
     if (filter) {
-      if (filter === "daily") {
-        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-        query.date = { $gte: start, $lt: end };
+      if (filter === "today") {
+        const startOfDay = new Date(now);
+        startOfDay.setHours(0, 0, 0, 0);
+        query.date = { $gte: startOfDay };
       } else if (filter === "week") {
         const start = new Date(now);
         start.setDate(now.getDate() - now.getDay());
@@ -39,74 +40,85 @@ export const getAllExpenses = async (req, res) => {
       }
     }
 
-    // --- REPORT TYPE (daily/weekly/monthly/yearly) ---
+    // --- REPORT TYPE LOGIC ---
     if (reportType || category || subcategory) {
       let reportData = [];
-      let aggQuery = { ...query }; // base filter
 
-      // --- Determine aggregation key ---
-      let groupId = null;
-      let labels = [];
-
+      // --- Report based on daily/weekly/monthly/yearly ---
       if (reportType) {
-        const now = new Date();
+        const currentYear = now.getFullYear();
+
         switch (reportType) {
-          case "daily":
-            groupId = { $dayOfWeek: "$date" };
-            labels = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+          case "daily": {
+            const agg = await Expense.aggregate([
+              { $match: query },
+              { $group: { _id: { $dayOfWeek: "$date" }, total: { $sum: "$amount" } } },
+            ]);
+            const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+            reportData = days.map((d, i) => {
+              const found = agg.find(a => a._id === i + 1);
+              return { name: d, total: found ? found.total : 0 };
+            });
             break;
-          case "week":
+          }
+
+          case "weekly": {
             const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
             const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-            aggQuery.date = { $gte: startOfMonth, $lte: endOfMonth };
-            groupId = { $week: "$date" };
-            labels = Array.from({ length: Math.ceil(endOfMonth.getDate() / 7) }, (_, i) => `Week ${i + 1}`);
+
+            const agg = await Expense.aggregate([
+              { $match: { ...query, date: { $gte: startOfMonth, $lte: endOfMonth } } },
+              { $group: { _id: { $week: "$date" }, total: { $sum: "$amount" } } },
+            ]);
+
+            const weeksInMonth = Math.ceil(endOfMonth.getDate() / 7);
+            reportData = Array.from({ length: weeksInMonth }, (_, i) => {
+              const weekNum = i + 1;
+              const found = agg.find(a => a._id === weekNum);
+              return { name: `Week ${weekNum}`, total: found ? found.total : 0 };
+            });
             break;
-          case "month":
-            groupId = { $month: "$date" };
-            labels = [
-              "January", "February", "March", "April", "May", "June",
-              "July", "August", "September", "October", "November", "December"
-            ];
-            aggQuery.date = { $gte: new Date(now.getFullYear(), 0, 1), $lt: new Date(now.getFullYear() + 1, 0, 1) };
+          }
+
+          case "monthly": {
+            const agg = await Expense.aggregate([
+              { $match: { ...query, date: { $gte: new Date(currentYear, 0, 1), $lt: new Date(currentYear + 1, 0, 1) } } },
+              { $group: { _id: { $month: "$date" }, total: { $sum: "$amount" } } },
+            ]);
+            const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            reportData = months.map((m, i) => {
+              const found = agg.find(a => a._id === i + 1);
+              return { name: m, total: found ? found.total : 0 };
+            });
             break;
-          case "year":
-            groupId = { $year: "$date" };
-            const currentYear = new Date().getFullYear();
-            labels = Array.from({ length: 4 }, (_, i) => (currentYear - (3 - i)).toString());
+          }
+
+          case "yearly": {
+            const startYear = currentYear - 3;
+            const endYear = currentYear;
+            const agg = await Expense.aggregate([
+              { $match: { ...query, date: { $gte: new Date(startYear, 0, 1), $lt: new Date(endYear + 1, 0, 1) } } },
+              { $group: { _id: { $year: "$date" }, total: { $sum: "$amount" } } },
+            ]);
+            reportData = Array.from({ length: 4 }, (_, i) => {
+              const year = startYear + i;
+              const found = agg.find(a => a._id === year);
+              return { name: year.toString(), total: found ? found.total : 0 };
+            });
             break;
+          }
         }
-      } else if (category) {
-        groupId = "$category_id";
-      } else if (subcategory) {
-        groupId = "$subcat_id";
       }
 
-      // --- Aggregation ---
-      let agg = await Expense.aggregate([
-        { $match: aggQuery },
-        { $group: { _id: groupId, total: { $sum: "$amount" } } },
-      ]);
-
-      // --- Map aggregation results to labels if applicable ---
-      if (reportType) {
-        reportData = labels.map((label, i) => {
-          let found;
-          if (reportType === "year") {
-            found = agg.find(a => a._id === parseInt(label));
-          } else {
-            found = agg.find(a => a._id === i + 1);
-          }
-          return { name: label, total: found ? found.total : 0 };
-        });
-      } else {
-        // category/subcategory mapping
+      // --- Category / Subcategory report ---
+      if (category || subcategory) {
+        const groupField = category ? "$category_id" : "$subcat_id";
         const lookupCollection = category ? "categories" : "subcategories";
         const lookupField = category ? "category" : "subcategory";
 
-        agg = await Expense.aggregate([
-          { $match: aggQuery },
-          { $group: { _id: groupId, total: { $sum: "$amount" } } },
+        reportData = await Expense.aggregate([
+          { $match: query },
+          { $group: { _id: groupField, total: { $sum: "$amount" } } },
           { $sort: { total: -1 } },
           { $limit: 5 },
           {
@@ -120,11 +132,9 @@ export const getAllExpenses = async (req, res) => {
           { $unwind: `$${lookupField}` },
           { $project: { _id: 0, name: `$${lookupField}.name`, total: 1 } },
         ]);
-
-        reportData = agg;
       }
 
-      // --- Top 5 expenses ---
+      // --- Top 5 expenses based on same filter ---
       const topExpenses = await Expense.find(query)
         .populate("category_id")
         .populate("subcat_id")
@@ -134,18 +144,11 @@ export const getAllExpenses = async (req, res) => {
       return res.json({ report: reportData, data: topExpenses });
     }
 
-    // --- NORMAL LIST (no reportType/category/subcategory) ---
+    // --- Normal paginated list ---
     const [total, totalAmountResult, expenses] = await Promise.all([
       Expense.countDocuments(query),
-      Expense.aggregate([
-        { $match: query },
-        { $group: { _id: null, totalAmount: { $sum: "$amount" } } },
-      ]),
-      Expense.find(query)
-        .populate("category_id")
-        .populate("subcat_id")
-        .skip(skip)
-        .limit(pageSize),
+      Expense.aggregate([{ $match: query }, { $group: { _id: null, totalAmount: { $sum: "$amount" } } }]),
+      Expense.find(query).populate("category_id").populate("subcat_id").skip(skip).limit(pageSize),
     ]);
 
     const totalAmount = totalAmountResult.length > 0 ? totalAmountResult[0].totalAmount : 0;
@@ -161,9 +164,11 @@ export const getAllExpenses = async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.status(500).json({ error: err.message });
+}
 };
+
+
 
 // Get expense by ID
 export const getExpenseById = async (req, res) => {
